@@ -32,6 +32,68 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/server/common"
 )
 
+// isStaticFileType checks if the file is a static file that should be displayed in the browser
+func isStaticFileType(fileName string) bool {
+	lowerName := strings.ToLower(fileName)
+	ext := strings.TrimPrefix(path.Ext(lowerName), ".")
+	
+	// Common static file extensions that should be displayed in the browser
+	staticExtensions := map[string]bool{
+		// HTML and related files
+		"html": true,
+		"htm":  true,
+		"shtml": true,
+		
+		// CSS files
+		"css":  true,
+		
+		// JavaScript files
+		"js":   true,
+		"jsx":  true,
+		"ts":   true,
+		"tsx":  true,
+		
+		// Image files
+		"png":  true,
+		"jpg":  true,
+		"jpeg": true,
+		"gif":  true,
+		"webp": true,
+		"svg":  true,
+		"ico":  true,
+		
+		// Audio files
+		"mp3":  true,
+		"wav":  true,
+		"ogg":  true,
+		"flac": true,
+		
+		// Video files
+		"mp4":  true,
+		"webm": true,
+		"avi":  true,
+		"mov":  true,
+		
+		// Text files
+		"txt":  true,
+		"md":   true,
+		"json": true,
+		"xml":  true,
+		"csv":  true,
+		
+		// PDF files
+		"pdf":  true,
+		
+		// Font files
+		"woff": true,
+		"woff2": true,
+		"ttf":  true,
+		"otf":  true,
+	}
+	
+	return staticExtensions[ext]
+}
+
 type Handler struct {
 	// Prefix is the URL path prefix to strip from WebDAV resource paths.
 	Prefix string
@@ -253,12 +315,13 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 		return http.StatusMethodNotAllowed, nil
 	}
 	fileName := fi.GetName()
-	isHTML := strings.HasSuffix(strings.ToLower(fileName), ".html") || strings.HasSuffix(strings.ToLower(fileName), ".htm")
+	// Check if the file is a static file that should be displayed in the browser
+	isStaticFile := isStaticFileType(fileName)
 	// Let ServeContent determine the Content-Type header.
 	storage, _ := fs.GetStorage(reqPath, &fs.GetStoragesArgs{})
 	if storage.GetStorage().Webdav302() {
-		// For HTML files, try to get the file content directly instead of redirecting
-		if isHTML {
+		// For static files, try to get the file content directly instead of redirecting
+		if isStaticFile {
 			link, _, err := fs.Link(ctx, reqPath, model.LinkArgs{IP: utils.ClientIP(r), Header: r.Header, Redirect: false})
 			if err != nil {
 				return http.StatusInternalServerError, err
@@ -267,7 +330,7 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 			if link.RangeReader != nil {
 				w.Header().Set("Content-Type", utils.GetMimeType(fileName))
 				w.Header().Set("Etag", common.GetEtag(fi, fi.GetSize()))
-				// For HTML files, use direct content instead of attachment
+				// For static files, use direct content instead of attachment
 				rangeReader, err := stream.GetRangeReaderFromLink(fi.GetSize(), link)
 				if err != nil {
 					return http.StatusInternalServerError, err
@@ -279,7 +342,7 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 					return http.StatusInternalServerError, err
 				}
 				defer reader.Close()
-				// For HTML files, directly copy the content to response
+				// For static files, directly copy the content to response
 				w.Header().Set("Content-Length", strconv.FormatInt(fi.GetSize(), 10))
 				_, err = io.Copy(w, reader)
 				if err != nil {
@@ -288,7 +351,7 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 				return 0, nil
 			}
 		}
-		// Fallback to redirect for non-HTML files or if direct content is not available
+		// Fallback to redirect for non-static files or if direct content is not available
 		link, _, err := fs.Link(ctx, reqPath, model.LinkArgs{IP: utils.ClientIP(r), Header: r.Header, Redirect: true})
 		if err != nil {
 			return http.StatusInternalServerError, err
@@ -312,11 +375,11 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 	}
 	defer link.Close()
 
-	// For HTML files, handle differently to avoid attachment header
-	if isHTML && link.RangeReader != nil {
+	// For static files, handle differently to avoid attachment header
+	if isStaticFile && link.RangeReader != nil {
 		w.Header().Set("Content-Type", utils.GetMimeType(fileName))
 		w.Header().Set("Etag", common.GetEtag(fi, fi.GetSize()))
-		// For HTML files, use direct content instead of attachment
+		// For static files, use direct content instead of attachment
 		rangeReader, err := stream.GetRangeReaderFromLink(fi.GetSize(), link)
 		if err != nil {
 			return http.StatusInternalServerError, err
@@ -328,7 +391,7 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 			return http.StatusInternalServerError, err
 		}
 		defer reader.Close()
-		// For HTML files, directly copy the content to response
+		// For static files, directly copy the content to response
 		w.Header().Set("Content-Length", strconv.FormatInt(fi.GetSize(), 10))
 		_, err = io.Copy(w, reader)
 		if err != nil {
