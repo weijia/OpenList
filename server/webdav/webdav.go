@@ -27,6 +27,7 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/fs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
+	"github.com/OpenListTeam/OpenList/v4/pkg/http_range"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
 	"github.com/OpenListTeam/OpenList/v4/server/common"
 )
@@ -251,9 +252,43 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 		}
 		return http.StatusMethodNotAllowed, nil
 	}
+	fileName := fi.GetName()
+	isHTML := strings.HasSuffix(strings.ToLower(fileName), ".html") || strings.HasSuffix(strings.ToLower(fileName), ".htm")
 	// Let ServeContent determine the Content-Type header.
 	storage, _ := fs.GetStorage(reqPath, &fs.GetStoragesArgs{})
 	if storage.GetStorage().Webdav302() {
+		// For HTML files, try to get the file content directly instead of redirecting
+		if isHTML {
+			link, _, err := fs.Link(ctx, reqPath, model.LinkArgs{IP: utils.ClientIP(r), Header: r.Header, Redirect: false})
+			if err != nil {
+				return http.StatusInternalServerError, err
+			}
+			defer link.Close()
+			if link.RangeReader != nil {
+				w.Header().Set("Content-Type", utils.GetMimeType(fileName))
+				w.Header().Set("Etag", common.GetEtag(fi, fi.GetSize()))
+				// For HTML files, use direct content instead of attachment
+				rangeReader, err := stream.GetRangeReaderFromLink(fi.GetSize(), link)
+				if err != nil {
+					return http.StatusInternalServerError, err
+				}
+				// Get full content
+				httpRange := http_range.Range{Start: 0, Length: fi.GetSize()}
+				reader, err := rangeReader.RangeRead(r.Context(), httpRange)
+				if err != nil {
+					return http.StatusInternalServerError, err
+				}
+				defer reader.Close()
+				// For HTML files, directly copy the content to response
+				w.Header().Set("Content-Length", strconv.FormatInt(fi.GetSize(), 10))
+				_, err = io.Copy(w, reader)
+				if err != nil {
+					return http.StatusInternalServerError, err
+				}
+				return 0, nil
+			}
+		}
+		// Fallback to redirect for non-HTML files or if direct content is not available
 		link, _, err := fs.Link(ctx, reqPath, model.LinkArgs{IP: utils.ClientIP(r), Header: r.Header, Redirect: true})
 		if err != nil {
 			return http.StatusInternalServerError, err
@@ -276,6 +311,31 @@ func (h *Handler) handleGetHeadPost(w http.ResponseWriter, r *http.Request) (sta
 		return http.StatusInternalServerError, err
 	}
 	defer link.Close()
+
+	// For HTML files, handle differently to avoid attachment header
+	if isHTML && link.RangeReader != nil {
+		w.Header().Set("Content-Type", utils.GetMimeType(fileName))
+		w.Header().Set("Etag", common.GetEtag(fi, fi.GetSize()))
+		// For HTML files, use direct content instead of attachment
+		rangeReader, err := stream.GetRangeReaderFromLink(fi.GetSize(), link)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		// Get full content
+		httpRange := http_range.Range{Start: 0, Length: fi.GetSize()}
+		reader, err := rangeReader.RangeRead(r.Context(), httpRange)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		defer reader.Close()
+		// For HTML files, directly copy the content to response
+		w.Header().Set("Content-Length", strconv.FormatInt(fi.GetSize(), 10))
+		_, err = io.Copy(w, reader)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		return 0, nil
+	}
 
 	if storage.GetStorage().ProxyRange {
 		link = common.ProxyRange(ctx, link, fi.GetSize())
