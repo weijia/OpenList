@@ -93,6 +93,19 @@ func (f FileInfo) fileToObj(basePath string, isPersonal bool) *Obj {
 	return obj
 }
 
+func (g Group) groupToObj(basePath string) *Obj {
+	return &Obj{
+		Obj: &model.Object{
+			ID:       strconv.FormatInt(g.GroupID, 10),
+			Path:     joinPath(basePath, g.Name),
+			Name:     g.Name,
+			IsFolder: true,
+		},
+		Kind:    "group",
+		GroupID: g.GroupID,
+	}
+}
+
 type filesResp struct {
 	Files      []FileInfo `json:"files"`
 	NextOffset int        `json:"next_offset"`
@@ -113,6 +126,14 @@ type spacesResp struct {
 		Type string `json:"type"`
 		Used int64  `json:"used"`
 	} `json:"used_parts"`
+}
+
+type serviceSpaceResp struct {
+	Info []struct {
+		ID         int64 `json:"id"`
+		SpaceTotal int64 `json:"space_total"`
+		SpaceUsed  int64 `json:"space_used"`
+	} `json:"info"`
 }
 
 type uploadCreateUpdateResp struct {
