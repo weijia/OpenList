@@ -88,7 +88,7 @@ func FsList(c *gin.Context, req *ListReq, user *model.User) {
 		common.ErrorResp(c, err, 500, true)
 		return
 	}
-	common.GinWithValue(c, conf.MetaKey, meta)
+	common.GinAppendValues(c, conf.MetaKey, meta)
 	if !common.CanAccess(user, meta, reqPath, req.Password) {
 		common.ErrorStrResp(c, "password is incorrect or you have no permission", 403)
 		return
@@ -109,8 +109,9 @@ func FsList(c *gin.Context, req *ListReq, user *model.User) {
 	total, objs := pagination(objs, &req.PageReq)
 	provider := "unknown"
 	var directUploadTools []string
-	if canWriteContentAtPath {
-		if storage, err := fs.GetStorage(reqPath, &fs.GetStoragesArgs{}); err == nil {
+	if storage, err := fs.GetStorage(reqPath, &fs.GetStoragesArgs{}); err == nil {
+		provider = storage.GetStorage().Driver
+		if canWriteContentAtPath {
 			directUploadTools = op.GetDirectUploadTools(storage)
 		}
 	}
@@ -152,7 +153,7 @@ func FsDirs(c *gin.Context) {
 		common.ErrorResp(c, err, 500, true)
 		return
 	}
-	common.GinWithValue(c, conf.MetaKey, meta)
+	common.GinAppendValues(c, conf.MetaKey, meta)
 	if !common.CanAccess(user, meta, reqPath, req.Password) {
 		common.ErrorStrResp(c, "password is incorrect or you have no permission", 403)
 		return
@@ -291,7 +292,7 @@ func FsGet(c *gin.Context, req *FsGetReq, user *model.User) {
 		common.ErrorResp(c, err, 500, true)
 		return
 	}
-	common.GinWithValue(c, conf.MetaKey, meta)
+	common.GinAppendValues(c, conf.MetaKey, meta)
 	if !common.CanAccess(user, meta, reqPath, req.Password) {
 		common.ErrorStrResp(c, "password is incorrect or you have no permission", 403)
 		return
@@ -347,11 +348,13 @@ func FsGet(c *gin.Context, req *FsGetReq, user *model.User) {
 			}
 		}
 	}
-	var related []model.Obj
 	parentPath := stdpath.Dir(reqPath)
-	sameLevelFiles, err := fs.List(c.Request.Context(), parentPath, &fs.ListArgs{})
-	if err == nil {
-		related = filterRelated(sameLevelFiles, obj)
+	var related []model.Obj
+	if !obj.IsDir() && utils.GetFileType(obj.GetName()) == conf.VIDEO {
+		sameLevelFiles, err := fs.List(c.Request.Context(), parentPath, &fs.ListArgs{})
+		if err == nil {
+			related = filterRelated(sameLevelFiles, obj)
+		}
 	}
 	parentMeta, _ := op.GetNearestMeta(parentPath)
 	thumb, _ := model.GetThumb(obj)
@@ -366,7 +369,7 @@ func FsGet(c *gin.Context, req *FsGetReq, user *model.User) {
 			HashInfoStr:  obj.GetHash().String(),
 			HashInfo:     obj.GetHash().Export(),
 			Sign:         common.Sign(obj, parentPath, isEncrypt(meta, reqPath)),
-			Type:         utils.GetFileType(obj.GetName()),
+			Type:         utils.GetObjType(obj.GetName(), obj.IsDir()),
 			Thumb:        thumb,
 			MountDetails: mountDetails,
 		},
@@ -415,7 +418,7 @@ func FsOther(c *gin.Context) {
 		common.ErrorResp(c, err, 500)
 		return
 	}
-	common.GinWithValue(c, conf.MetaKey, meta)
+	common.GinAppendValues(c, conf.MetaKey, meta)
 	if !common.CanAccess(user, meta, req.Path, req.Password) {
 		common.ErrorStrResp(c, "password is incorrect or you have no permission", 403)
 		return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -262,6 +263,16 @@ func (y *Cloud189PC) Move(ctx context.Context, srcObj, dstDir model.Obj) (model.
 	if err = y.WaitBatchTask("MOVE", resp.TaskID, time.Millisecond*400); err != nil {
 		return nil, err
 	}
+
+	// 跟随移动 torrent 文件
+	if !srcObj.IsDir() {
+		var srcFolderId string
+		if f, ok := srcObj.(*Cloud189File); ok {
+			srcFolderId = f.ParentID
+		}
+		y.torrentFollowMove(srcFolderId, srcObj.GetName(), dstDir)
+	}
+
 	return srcObj, nil
 }
 
@@ -291,13 +302,19 @@ func (y *Cloud189PC) Rename(ctx context.Context, srcObj model.Obj, newName strin
 	var resp RenameResp
 	_, err := y.request(fullUrl, method, func(req *resty.Request) {
 		req.SetContext(ctx).SetQueryParams(queryParam)
-	}, nil, resp, isFamily)
+	}, nil, &resp, isFamily)
 	if err != nil {
-		if resp.ResCode == "FileAlreadyExists" {
+		if code, ok := resp.ResCode.(string); ok && code == "FileAlreadyExists" {
 			return nil, errs.ObjectAlreadyExists
 		}
 		return nil, err
 	}
+
+	// 跟随重命名 torrent 文件
+	if f, ok := srcObj.(*Cloud189File); ok {
+		y.torrentFollowRename(f.ParentID, srcObj.GetName(), newName)
+	}
+
 	switch f := srcObj.(type) {
 	case *Cloud189File:
 		return resp.toFile(f), nil
@@ -319,7 +336,20 @@ func (y *Cloud189PC) Copy(ctx context.Context, srcObj, dstDir model.Obj) error {
 	if err != nil {
 		return err
 	}
-	return y.WaitBatchTask("COPY", resp.TaskID, time.Second)
+	if err = y.WaitBatchTask("COPY", resp.TaskID, time.Second); err != nil {
+		return err
+	}
+
+	// 跟随复制 torrent 文件
+	if !srcObj.IsDir() {
+		var srcFolderId string
+		if f, ok := srcObj.(*Cloud189File); ok {
+			srcFolderId = f.ParentID
+		}
+		y.torrentFollowCopy(srcFolderId, srcObj.GetName(), dstDir)
+	}
+
+	return nil
 }
 
 func (y *Cloud189PC) Remove(ctx context.Context, obj model.Obj) error {
@@ -337,12 +367,21 @@ func (y *Cloud189PC) Remove(ctx context.Context, obj model.Obj) error {
 	return y.WaitBatchTask("DELETE", resp.TaskID, time.Millisecond*200)
 }
 
+func familyTransferTempName(srcName string) string {
+	ext := path.Ext(srcName)
+	if ext == "" {
+		ext = ".transfer"
+	}
+	return fmt.Sprintf("0%s%s", uuid.NewString(), ext)
+}
+
 func (y *Cloud189PC) Put(ctx context.Context, dstDir model.Obj, stream model.FileStreamer, up driver.UpdateProgress) (newObj model.Obj, err error) {
 	overwrite := true
 	isFamily := y.isFamily()
 
 	// 响应时间长,按需启用
 	if y.Addition.RapidUpload && !stream.IsForceStreamUpload() {
+		// 尝试妙传
 		if newObj, err := y.RapidUpload(ctx, dstDir, stream, isFamily, overwrite); err == nil {
 			return newObj, nil
 		}
@@ -351,10 +390,11 @@ func (y *Cloud189PC) Put(ctx context.Context, dstDir model.Obj, stream model.Fil
 	uploadMethod := y.UploadMethod
 	if stream.IsForceStreamUpload() {
 		uploadMethod = "stream"
-	}
-
-	// 旧版上传家庭云也有限制
-	if uploadMethod == "old" {
+	} else if y.Addition.RapidUpload && stream.GetFile() != nil {
+		// 文件流支持随机读取，走FastUpload计算MD5并尝试秒传
+		uploadMethod = "rapid"
+	} else if uploadMethod == "old" {
+		// 旧版上传家庭云也有限制
 		return y.OldUpload(ctx, dstDir, stream, up, isFamily, overwrite)
 	}
 
@@ -368,7 +408,7 @@ func (y *Cloud189PC) Put(ctx context.Context, dstDir model.Obj, stream model.Fil
 		srcName := stream.GetName()
 		stream = &WrapFileStreamer{
 			FileStreamer: stream,
-			Name:         fmt.Sprintf("0%s.transfer", uuid.NewString()),
+			Name:         familyTransferTempName(srcName),
 		}
 
 		// 使用家庭云上传
@@ -415,19 +455,6 @@ func (y *Cloud189PC) Put(ctx context.Context, dstDir model.Obj, stream model.Fil
 	case "stream":
 		if stream.GetSize() == 0 {
 			return y.FastUpload(ctx, dstDir, stream, up, isFamily, overwrite)
-		}
-		// 尝试秒传：如果已有MD5且启用了RapidUpload则用RapidUpload，否则走FastUpload（会计算MD5并尝试秒传）
-		if !stream.IsForceStreamUpload() {
-			fileMd5 := stream.GetHash().GetHash(utils.MD5)
-			if len(fileMd5) >= utils.MD5.Width && y.Addition.RapidUpload {
-				// 源文件已有MD5且启用了RapidUpload配置，尝试快速秒传
-				if newObj, err := y.RapidUpload(ctx, dstDir, stream, isFamily, overwrite); err == nil {
-					return newObj, nil
-				}
-			} else if len(fileMd5) < utils.MD5.Width {
-				// 源文件无MD5（如从本地复制），走FastUpload计算MD5并尝试秒传
-				return y.FastUpload(ctx, dstDir, stream, up, isFamily, overwrite)
-			}
 		}
 		fallthrough
 	default:
