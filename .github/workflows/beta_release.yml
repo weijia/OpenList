@@ -43,10 +43,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # GitHub caps a release body at 125000 characters. changelogithub
+          # regenerates the whole history on a long-lived beta tag, which
+          # overflows the cap and made `gh release edit` fail with HTTP 422,
+          # skipping the whole release matrix. Clamp the notes for the body
+          # and keep the complete changelog as a release asset.
+          head -c 120000 CHANGELOG.md > RELEASE_NOTES.md
           if ! gh release view beta; then
-            gh release create beta --prerelease --notes-file CHANGELOG.md
+            gh release create beta --prerelease --notes-file RELEASE_NOTES.md
           else
-            gh release edit beta --prerelease --notes-file CHANGELOG.md
+            gh release edit beta --prerelease --notes-file RELEASE_NOTES.md
           fi
           gh release upload beta "CHANGELOG.md" --clobber
 
@@ -61,6 +67,9 @@ jobs:
   release:
     needs:
       - changelog
+    # Keep building even if the changelog job fails: the binaries are the
+    # part that matters, and a missing release is created below.
+    if: ${{ !cancelled() }}
     strategy:
       matrix:
         include:
@@ -171,6 +180,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if ! gh release view beta; then
+            gh release create beta --prerelease --notes "OpenList beta builds"
+          fi
           for file in build/compress/*; do
             gh release upload beta "$file" --clobber
           done
