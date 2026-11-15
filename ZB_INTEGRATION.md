@@ -223,3 +223,49 @@ go build -o C:\codes\go\OpenListZB\.new.exe .
 
 注意：`data\config.json` 的 `dist_dir` 保持空字符串即用内嵌资源；若指向某个外部目录（如旧版用的
 `web\`），运行时就会改用该目录，删掉目录后记得把 `dist_dir` 置空，否则会回落到 launcher。
+
+## 12. 新增驱动 RemoteStorage（挂载 remotestorage.io 协议服务器）
+
+`drivers/remotestorage/` 是新增的存储驱动，让 OpenList 以客户端身份挂载任意实现 remoteStorage
+协议的服务器（`https://remotestorage.io`，如自建 `remotestorage-server`、5apps 等）。
+注册位置 `drivers/all.go`，后台驱动列表里显示为 `RemoteStorage`。
+
+配置项（后台“存储 → 添加 → RemoteStorage”）：
+
+| 字段 | 说明 |
+|---|---|
+| 挂载路径 | 如 `/rs` |
+| endpoint | 存储根地址，**含用户名**，如 `https://storage.example.com/alice` |
+| token | OAuth bearer token，请求时发 `Authorization: Bearer <token>` |
+| root_folder_path | 起始目录（模块），如 `/documents`，可留空表示整个 `<endpoint>` |
+| tls_insecure_skip_verify | 自签证书时勾选 |
+
+协议实现要点：
+
+- 列目录：`GET <endpoint>/<path>/`，`Accept: application/ld+json; profile="http://www.w3.org/ns/webdav"`，
+  解析返回的 `items`（文件带 `Content-Type`/`Content-Length`，目录键以 `/` 结尾）；
+- 读取：`GET <endpoint>/<path>`，`Authorization: Bearer`；
+- 上传：先 `HEAD` 取 `ETag`，新文件用 `If-None-Match: *`，覆盖用 `If-Match: <etag>`，再 `PUT`；
+- 建目录：`PUT <dir>/`，`Content-Type: application/ld+json; profile="http://www.w3.org/ns/webdav"`
+  （目录是隐式的，服务端返回 409 视为成功）；
+- 删除：`DELETE`，目录需带结尾 `/`；
+- 重命名/移动/复制：协议没有原生接口，按“读源文档 → 写到目标路径 → 删除源”实现，目录递归处理。
+
+`Config.OnlyProxy = true`：文档必须带 `Authorization` 头才能读，直接给裸链会 401，所以下载统一走
+OpenList 的 `/p/...?sign=` 代理，由服务端注入请求头。
+
+本机验证（用 Python 写的 mock remoteStorage 服务，token `testtoken`，根目录 `<tmp>/rs_mock_store`）：
+
+| 操作 | 结果 |
+|---|---|
+| 挂载 `/rs`、`root_folder_path=documents` | 列表返回 `hello.txt`(31B)、`sub` 目录 |
+| `/api/fs/get` -> `/p/rs/hello.txt?sign=...` | 200，31 字节 |
+| `PUT /api/fs/put` 上传 `uploaded.txt` | 200，mock 日志 `PUT /alice/documents/uploaded.txt` |
+| `POST /api/fs/mkdir` 建 `/rs/sub` | 200，mock 日志 `PUT /alice/documents/sub/` |
+| `POST /api/fs/copy` -> `/rs/sub` | 200，日志 `GET` + `PUT` |
+| `POST /api/fs/move` -> `/rs/sub` | 200，日志 `GET` + `PUT` + `DELETE` |
+| `POST /api/fs/remove` | 200，日志 `DELETE /alice/documents/sub/hello.txt` |
+| `/zb/api/list?path=/rs` | 200，返回 `hello.txt` 与 `sub` |
+
+已知限制：remoteStorage 文件夹清单不提供修改时间，列表里 `mtime` 为 0（后台显示 0001-01-01），
+不影响读写；测试用的 `/rs` 挂载与 mock 服务已在验证后删除，驱动本身保留在后台可选。
