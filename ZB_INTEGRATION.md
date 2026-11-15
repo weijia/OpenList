@@ -190,3 +190,36 @@ go build -o openlist_zb.exe .
 
 注意：管理后台走的是原生 `/api/auth/login`，仍是 48 小时 token 且校验同一条内存缓存，
 重启后同样会掉登录；如需要，可把 `data/config.json` 的 `token_expires_in` 调大。
+
+## 11. 构建前准备：官方后台前端不在仓库里
+
+仓库 `.gitignore` 第 33 行是 `/public/dist/*`，所以只有 `public/dist/README.md` 被跟踪，官方后台前端
+（约 65MB）**不随仓库分发**。因此从一个全新 clone 直接 `go build` 出来的 exe，`/@manage` 仍会退回
+launcher 重定向到 `/zb/`；运行包 `C:\codes\go\OpenListZB` 里的 exe 之所以带后台，是因为构建前把
+dist 放进了 `public/dist`，由 `public/public.go` 的 `//go:embed all:dist` 编进二进制。
+
+构建前先补 dist（PowerShell，在仓库根目录执行）：
+
+```powershell
+$ver = 'v4.2.9'
+$url = "https://github.com/OpenListTeam/OpenList-Frontend/releases/download/$ver/openlist-frontend-dist-$ver.tar.gz"
+Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\openlist-frontend.tar.gz" -UseBasicParsing
+New-Item -ItemType Directory -Force -Path .\public\dist | Out-Null
+tar -xzf "$env:TEMP\openlist-frontend.tar.gz" -C .\public\dist
+```
+
+解压后 `public/dist` 应包含 `index.html`、`assets/`、`static/`、`images/`、`streamer/`、`VERSION`，
+再执行：
+
+```powershell
+$env:GOROOT='C:\codes\_gosdk\go'; $env:PATH="$env:GOROOT\bin;"+$env:PATH
+$env:GOTOOLCHAIN='local'; $env:GOPROXY='https://mirrors.huaweicloud.com/repository/goproxy/,direct'
+$env:GOSUMDB='off'; $env:CGO_ENABLED='0'
+go build -o C:\codes\go\OpenListZB\.new.exe .
+```
+
+校验：exe 体积约 202MB（含前端）；启动后 `GET /@manage` 返回 8445 字节的真实 SPA（不是
+`<meta http-equiv="refresh" content="0; url=zb/">`）。
+
+注意：`data\config.json` 的 `dist_dir` 保持空字符串即用内嵌资源；若指向某个外部目录（如旧版用的
+`web\`），运行时就会改用该目录，删掉目录后记得把 `dist_dir` 置空，否则会回落到 launcher。
