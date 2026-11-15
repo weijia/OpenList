@@ -91,6 +91,7 @@ func Start() {
 		time.Sleep(time.Duration(conf.Conf.DelayedStart) * time.Second)
 	}
 	InitOfflineDownloadTools()
+	EnsureLocalDriveStorages()
 	LoadStorages()
 	InitTaskManager()
 	// 初始化转码模块（总开关关时也会启动 manager，但本地 worker 仅在 enabled 时由 Manager.Start 内部按 run_mode 启动）

@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/OpenListTeam/OpenList/v4/drivers/base"
+	"html"
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
 	"github.com/OpenListTeam/OpenList/v4/internal/setting"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
@@ -59,39 +59,26 @@ func replaceStrings(content string, replacements map[string]string) string {
 
 func initIndex(siteConfig SiteConfig) {
 	utils.Log.Debug("Initializing index.html...")
-	// dist_dir is empty and cdn is not empty, and web_version is empty or beta or dev or rolling
-	if conf.Conf.DistDir == "" && conf.Conf.Cdn != "" && (conf.WebVersion == "" || conf.WebVersion == "beta" || conf.WebVersion == "dev" || conf.WebVersion == "rolling") {
-		utils.Log.Infof("Fetching index.html from CDN: %s/index.html...", siteConfig.Cdn)
-		resp, err := base.RestyClient.R().
-			SetHeader("Accept", "text/html").
-			Get(fmt.Sprintf("%s/index.html", siteConfig.Cdn))
-		if err != nil {
-			utils.Log.Fatalf("failed to fetch index.html from CDN: %v", err)
-		}
-		if resp.StatusCode() != http.StatusOK {
-			utils.Log.Fatalf("failed to fetch index.html from CDN, status code: %d", resp.StatusCode())
-		}
-		conf.RawIndexHtml = string(resp.Body())
-		utils.Log.Info("Successfully fetched index.html from CDN")
-	} else {
-		utils.Log.Debug("Reading index.html from static files system...")
-		indexFile, err := static.Open("index.html")
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				utils.Log.Fatalf("index.html not exist, you may forget to put dist of frontend to public/dist")
-			}
+	indexFile, err := static.Open("index.html")
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
 			utils.Log.Fatalf("failed to read index.html: %v", err)
 		}
-		defer func() {
-			_ = indexFile.Close()
-		}()
-		index, err := io.ReadAll(indexFile)
-		if err != nil {
-			utils.Log.Fatalf("failed to read dist/index.html")
-		}
-		conf.RawIndexHtml = string(index)
-		utils.Log.Debug("Successfully read index.html from static files system")
+		// No frontend dist shipped: OpenList now serves the zip-browser UI under /zb.
+		conf.RawIndexHtml = launcherHTML(setting.GetStr(conf.SiteTitle))
+		utils.Log.Info("index.html not found in dist, using launcher for /zb (zip-browser frontend)")
+		UpdateIndex()
+		return
 	}
+	defer func() {
+		_ = indexFile.Close()
+	}()
+	index, err := io.ReadAll(indexFile)
+	if err != nil {
+		utils.Log.Fatalf("failed to read dist/index.html")
+	}
+	conf.RawIndexHtml = string(index)
+	utils.Log.Debug("Successfully read index.html from static files system")
 	utils.Log.Debug("Replacing placeholders in index.html...")
 	// Construct the correct manifest path based on basePath
 	manifestPath := "/manifest.json"
@@ -183,6 +170,18 @@ func ManifestJSON(c *gin.Context) {
 	}
 }
 
+func launcherHTML(title string) string {
+	if title == "" {
+		title = "OpenList"
+	}
+	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">` +
+		`<meta name="viewport" content="width=device-width, initial-scale=1">` +
+		`<title>` + html.EscapeString(title) + `</title>` +
+		`<meta http-equiv="refresh" content="0; url=zb/">` +
+		`<script>location.replace('zb/'+location.search+location.hash)</script>` +
+		`</head><body style="font:14px system-ui;padding:24px">正在进入文件浏览器…</body></html>`
+}
+
 func Static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc)) {
 	utils.Log.Debug("Setting up static routes...")
 	siteConfig := getSiteConfig()
@@ -202,7 +201,8 @@ func Static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc)) {
 		for _, folder := range folders {
 			sub, err := fs.Sub(static, folder)
 			if err != nil {
-				utils.Log.Fatalf("can't find folder: %s", folder)
+				utils.Log.Debugf("skip missing dist folder: %s", folder)
+				continue
 			}
 			utils.Log.Debugf("Setting up route for folder: %s", folder)
 			r.StaticFS(fmt.Sprintf("/%s/", folder), http.FS(sub))

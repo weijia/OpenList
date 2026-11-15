@@ -12,6 +12,7 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/server/handles"
 	"github.com/OpenListTeam/OpenList/v4/server/middlewares"
 	"github.com/OpenListTeam/OpenList/v4/server/static"
+	"github.com/OpenListTeam/OpenList/v4/server/zb"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -37,6 +38,7 @@ func Init(e *gin.Engine) {
 	g.GET("/i/:link_name", handles.Plist)
 	common.SecretKey = []byte(conf.Conf.JwtSecret)
 	g.Use(middlewares.StoragesLoaded)
+	zb.Register(g)
 	if conf.Conf.MaxConnections > 0 {
 		g.Use(middlewares.MaxAllowed(conf.Conf.MaxConnections))
 	}
