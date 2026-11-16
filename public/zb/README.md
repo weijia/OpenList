@@ -22,3 +22,8 @@ ZB_REPO=your-name/zip-browser bash build.sh dev web
 ```
 
 `FetchZbDist` 下载失败时会保留现有 `public/zb`，避免离线构建被卡死；需要强制更新时先删除该目录再构建。
+
+## 私有仓库
+
+默认的 `weijia/zip-browser` 目前是私有仓库。构建机需要提供 `GITHUB_TOKEN`（`repo` 权限），
+脚本会同时用它读取 Release 元数据和下载资产；仓库转为公开后无需 token 也能匿名下载。
