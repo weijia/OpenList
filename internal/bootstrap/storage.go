@@ -20,15 +20,19 @@ import (
 const (
 	autoStorageRemark       = "自动挂载本地磁盘"
 	legacyAutoStorageRemark = "首次启动自动创建的本地目录"
+	// autoMountMarkerV2 adds Android shared storage to installations that
+	// already ran the first version of auto provisioning.
+	autoMountMarkerV2 = "auto-mount-v2.done"
 )
 
 // EnsureLocalDriveStorages mounts every local drive root (C:\, D:\ ... on
-// Windows, / on Unix) as a separate Local storage on first start, so the
-// browser front-end opens with the real disks instead of an empty list.
+// Windows, / and /sdcard on Android, / on other Unix) as a separate Local
+// storage on first start, so the browser front-end opens with the real disks
+// instead of an empty list.
 // It only acts while every storage in the database is one of its own: once
 // the user adds or edits a mount by hand, it leaves the configuration alone.
 func EnsureLocalDriveStorages() {
-	marker := filepath.Join(flags.DataDir, "auto-mount.done")
+	marker := filepath.Join(flags.DataDir, autoMountMarkerV2)
 	if _, err := os.Stat(marker); err == nil {
 		// already provisioned once; never touch the user's mounts again
 		return
@@ -106,6 +110,16 @@ func EnsureLocalDriveStorages() {
 
 // localDriveRoots lists existing drive roots.
 func localDriveRoots() []string {
+	if runtime.GOOS == "android" {
+		// Android apps do not share the Unix root's view of storage. Expose the
+		// device's shared storage as a separate mount when it is reachable
+		// (MANAGE_EXTERNAL_STORAGE is required to see user files on Android 11+).
+		roots := []string{"/"}
+		if fi, err := os.Stat("/sdcard"); err == nil && fi.IsDir() {
+			roots = append(roots, "/sdcard")
+		}
+		return roots
+	}
 	if runtime.GOOS != "windows" {
 		return []string{"/"}
 	}
@@ -119,8 +133,15 @@ func localDriveRoots() []string {
 	return roots
 }
 
-// driveMountPath maps C:\ to /C; Unix root becomes /local.
+// driveMountPath maps C:\ to /C; Unix root becomes /local. On Android the
+// shared storage root gets its familiar /sdcard mount path.
 func driveMountPath(root string) string {
+	if runtime.GOOS == "android" {
+		if filepath.Clean(root) == "/sdcard" {
+			return "/sdcard"
+		}
+		return "/local"
+	}
 	if runtime.GOOS != "windows" {
 		return "/local"
 	}
