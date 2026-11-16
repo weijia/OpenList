@@ -161,9 +161,11 @@ func serveIndex(c *gin.Context, user *model.User) {
 	}
 	username := ""
 	isAdmin := false
+	canRemove := false
 	if user != nil && !user.IsGuest() {
 		username = user.Username
 		isAdmin = user.IsAdmin()
+		canRemove = user.CanRemove()
 	}
 	host := map[string]any{
 		"basePath":        baseURL(),
@@ -196,6 +198,7 @@ func serveIndex(c *gin.Context, user *model.User) {
 			"explorer": false,
 			"encoding": false,
 			"admin":    isAdmin,
+			"remove":   canRemove,
 			"login":    true,
 		},
 	}
