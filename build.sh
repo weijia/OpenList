@@ -129,7 +129,10 @@ FetchWebRelease() {
 # /zb 兼容层的前端来自 zip-browser 的发布产物（宿主无关，同一份 dist 也能跑自带 Node 服务）。
 # 下载失败时保留仓库内已有的 public/zb，避免离线环境把 go build 卡死。
 FetchZbDist() {
-  zb_release_json=$(eval "curl -fsSL --max-time 10 $githubAuthArgs -H \"Accept: application/vnd.github.v3+json\" \"https://api.github.com/repos/$zbRepo/releases/latest\"")
+  zb_release_json=$(eval "curl -fsSL --max-time 10 $githubAuthArgs -H \"Accept: application/vnd.github.v3+json\" \"https://api.github.com/repos/$zbRepo/releases/latest\"") || {
+    echo "warn: 未能读取 $zbRepo 的 Release（私有仓库请设置 GITHUB_TOKEN），沿用现有 public/zb"
+    return 0
+  }
   zb_tar_url=$(echo "$zb_release_json" | jq -r '.assets[].browser_download_url' | grep "zip-browser-web" | grep "\.tar\.gz$" | head -n 1)
 
   if [ -z "$zb_tar_url" ]; then
