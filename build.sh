@@ -137,7 +137,11 @@ FetchZbDist() {
     return 0
   fi
 
-  if ! curl -fsSL "$zb_tar_url" -o zb-dist.tar.gz; then
+  zb_auth=()
+  if [ -n "$GITHUB_TOKEN" ]; then
+    zb_auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+  fi
+  if ! curl -fsSL --max-time 60 "${zb_auth[@]}" "$zb_tar_url" -o zb-dist.tar.gz; then
     echo "warn: 下载 $zb_tar_url 失败，沿用现有 public/zb"
     rm -f zb-dist.tar.gz
     return 0

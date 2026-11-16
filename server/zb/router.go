@@ -215,6 +215,7 @@ func serveIndex(c *gin.Context, user *model.User) {
 	page = strings.ReplaceAll(page, "__ZB_USER_VALUE__", jsString(username))
 	// 自带 Node 服务用的注入点，在 OpenList 下必须替换成合法 JS 值。
 	page = strings.ReplaceAll(page, "__ZIP_BROWSER_TOKEN__", "")
+	page = strings.ReplaceAll(page, "__ZIP_BROWSER_HOST__", "")
 	versionJSON, _ := json.Marshal(conf.Version)
 	page = strings.ReplaceAll(page, "__ZIP_BROWSER_VERSION__", string(versionJSON))
 	page = strings.Replace(page, "<head>", "<head>\n<script>window.ZB_HOST="+string(hostJSON)+";</script>", 1)
