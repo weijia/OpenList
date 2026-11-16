@@ -68,6 +68,10 @@ func handleAPI(c *gin.Context, user *model.User, endpoint string) {
 	case endpoint == "logout":
 		handleLogout(c)
 		return
+	case endpoint == "version":
+		// 版本号不含权限信息，登录前也要能显示/检查更新。
+		apiVersion(c, user)
+		return
 	}
 	if !requireUser(c, user) {
 		return
@@ -81,8 +85,6 @@ func handleAPI(c *gin.Context, user *model.User, endpoint string) {
 		apiDownload(c, user)
 	case endpoint == "hostinfo":
 		apiHostInfo(c, user)
-	case endpoint == "version":
-		apiVersion(c, user)
 	case endpoint == "trash":
 		apiTrash(c, user)
 	case endpoint == "zip/open":

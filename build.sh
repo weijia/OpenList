@@ -6,6 +6,7 @@ gitCommit=$(git log --pretty=format:"%h" -1)
 
 # Set frontend repository, default to OpenListTeam/OpenList-Frontend
 frontendRepo="${FRONTEND_REPO:-OpenListTeam/OpenList-Frontend}"
+zbRepo="${ZB_REPO:-weijia/zip-browser}"
 
 githubAuthArgs=""
 if [ -n "$GITHUB_TOKEN" ]; then
@@ -123,6 +124,30 @@ FetchWebRelease() {
   rm -rf public/dist && mkdir -p public/dist
   tar -zxvf dist.tar.gz -C public/dist
   rm -rf dist.tar.gz
+}
+
+# /zb 兼容层的前端来自 zip-browser 的发布产物（宿主无关，同一份 dist 也能跑自带 Node 服务）。
+# 下载失败时保留仓库内已有的 public/zb，避免离线环境把 go build 卡死。
+FetchZbDist() {
+  zb_release_json=$(eval "curl -fsSL --max-time 10 $githubAuthArgs -H \"Accept: application/vnd.github.v3+json\" \"https://api.github.com/repos/$zbRepo/releases/latest\"")
+  zb_tar_url=$(echo "$zb_release_json" | jq -r '.assets[].browser_download_url' | grep "zip-browser-web" | grep "\.tar\.gz$" | head -n 1)
+
+  if [ -z "$zb_tar_url" ]; then
+    echo "warn: 未能从 $zbRepo 的 Release 找到 zip-browser-web.tar.gz，沿用现有 public/zb"
+    return 0
+  fi
+
+  if ! curl -fsSL "$zb_tar_url" -o zb-dist.tar.gz; then
+    echo "warn: 下载 $zb_tar_url 失败，沿用现有 public/zb"
+    rm -f zb-dist.tar.gz
+    return 0
+  fi
+  mkdir -p public/zb
+  # 保留受版本控制的 README.md，其余 dist 文件整体替换，避免把约 900 KB 产物提交进仓库。
+  find public/zb -mindepth 1 ! -name README.md -exec rm -rf {} +
+  tar -zxvf zb-dist.tar.gz -C public/zb --strip-components=1
+  rm -f zb-dist.tar.gz
+  echo "zb: 已从 $zbRepo 的 Release 更新 public/zb"
 }
 
 BuildWinArm64() {
@@ -638,6 +663,7 @@ done
 
 if [ "$buildType" = "dev" ]; then
   FetchWebRolling
+  FetchZbDist
   if [ "$dockerType" = "docker" ]; then
     BuildDocker
   elif [ "$dockerType" = "docker-multiplatform" ]; then
@@ -653,6 +679,7 @@ elif [ "$buildType" = "release" -o "$buildType" = "beta" ]; then
   else
     FetchWebRelease
   fi
+  FetchZbDist
   if [ "$dockerType" = "docker" ]; then
     BuildDocker
   elif [ "$dockerType" = "docker-multiplatform" ]; then
