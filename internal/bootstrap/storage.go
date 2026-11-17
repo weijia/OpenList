@@ -20,19 +20,20 @@ import (
 const (
 	autoStorageRemark       = "自动挂载本地磁盘"
 	legacyAutoStorageRemark = "首次启动自动创建的本地目录"
-	// autoMountMarkerV2 adds Android shared storage to installations that
-	// already ran the first version of auto provisioning.
-	autoMountMarkerV2 = "auto-mount-v2.done"
+	// autoMountMarkerV3 re-runs provisioning once for installations that already
+	// completed v2, so local drives are added even when other mounts exist.
+	autoMountMarkerV3 = "auto-mount-v3.done"
 )
 
 // EnsureLocalDriveStorages mounts every local drive root (C:\, D:\ ... on
 // Windows, / and /sdcard on Android, / on other Unix) as a separate Local
 // storage on first start, so the browser front-end opens with the real disks
 // instead of an empty list.
-// It only acts while every storage in the database is one of its own: once
-// the user adds or edits a mount by hand, it leaves the configuration alone.
+// Existing manually configured storages do not suppress this provisioning.
+// Mount paths that are already occupied are left untouched, and only stale
+// auto-created storages are removed.
 func EnsureLocalDriveStorages() {
-	marker := filepath.Join(flags.DataDir, autoMountMarkerV2)
+	marker := filepath.Join(flags.DataDir, autoMountMarkerV3)
 	if _, err := os.Stat(marker); err == nil {
 		// already provisioned once; never touch the user's mounts again
 		return
@@ -42,32 +43,29 @@ func EnsureLocalDriveStorages() {
 		utils.Log.Errorf("failed check storages for auto mount: %+v", err)
 		return
 	}
+	roots := localDriveRoots()
+	autoRoots := make(map[string]bool, len(storages))
 	for _, s := range storages {
 		if !isAutoStorage(s) {
-			return
+			continue
 		}
-	}
-	roots := localDriveRoots()
-	existing := make(map[string]bool, len(storages))
-	for _, s := range storages {
 		root := additionRoot(s.Addition)
-		if root == "" {
-			continue
-		}
-		key := normalizeRoot(root)
-		if !containsRoot(roots, key) {
-			// stale auto mount (e.g. the old <program>/files folder)
-			if err := db.DeleteStorageById(s.ID); err != nil {
-				utils.Log.Errorf("failed remove stale auto storage [%s]: %+v", s.MountPath, err)
-			} else {
-				utils.Log.Infof("removed stale auto storage [%s] -> %s", s.MountPath, root)
+		if root != "" {
+			key := normalizeRoot(root)
+			if containsRoot(roots, key) {
+				autoRoots[key] = true
+				continue
 			}
-			continue
 		}
-		existing[key] = true
+		// stale auto mount (e.g. the old <program>/files folder)
+		if err := db.DeleteStorageById(s.ID); err != nil {
+			utils.Log.Errorf("failed remove stale auto storage [%s]: %+v", s.MountPath, err)
+		} else {
+			utils.Log.Infof("removed stale auto storage [%s] -> %s", s.MountPath, root)
+		}
 	}
 	for _, root := range roots {
-		if existing[normalizeRoot(root)] {
+		if autoRoots[normalizeRoot(root)] {
 			continue
 		}
 		mount := driveMountPath(root)
