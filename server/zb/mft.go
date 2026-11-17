@@ -475,10 +475,49 @@ func apiMftTree(c *gin.Context, user *model.User) {
 		}
 		children = append(children, gin.H{"name": name, "path": joinVirtual(p, name)})
 	}
+	probeTreeChildren(c.Request.Context(), user, children)
 	writeJSON(c, http.StatusOK, gin.H{
 		"path":     p,
 		"name":     baseName(p),
 		"tags":     detectTags(names),
 		"children": children,
 	})
+}
+
+// probeTreeChildren 给每个直接子目录探测“是否还有下一层”。
+// 返回 false 时前端可以不再画展开箭头；读不到时保持 null，按未知处理，避免误标。
+func probeTreeChildren(ctx context.Context, user *model.User, children []gin.H) {
+	const probeConcurrency = 6
+	sem := make(chan struct{}, probeConcurrency)
+	var wg sync.WaitGroup
+	for i := range children {
+		childPath, _ := children[i]["path"].(string)
+		wg.Add(1)
+		go func(i int, path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			children[i]["hasChildren"] = probeHasChildDirs(ctx, user, path)
+		}(i, childPath)
+	}
+	wg.Wait()
+}
+
+func probeHasChildDirs(ctx context.Context, user *model.User, virtualPath string) *bool {
+	reqPath, err := user.JoinPath(virtualPath)
+	if err != nil {
+		return nil
+	}
+	objs, err := fs.List(ctx, reqPath, &fs.ListArgs{NoLog: true})
+	if err != nil {
+		return nil
+	}
+	for _, obj := range objs {
+		if obj.IsDir() {
+			has := true
+			return &has
+		}
+	}
+	has := false
+	return &has
 }
