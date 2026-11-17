@@ -13,6 +13,7 @@ import (
 	"github.com/OpenListTeam/OpenList/v4/cmd/flags"
 	"github.com/OpenListTeam/OpenList/v4/internal/bootstrap/data"
 	"github.com/OpenListTeam/OpenList/v4/internal/conf"
+	"github.com/OpenListTeam/OpenList/v4/internal/configsync"
 	"github.com/OpenListTeam/OpenList/v4/internal/db"
 	"github.com/OpenListTeam/OpenList/v4/internal/fs"
 	"github.com/OpenListTeam/OpenList/v4/internal/transcode"
@@ -92,6 +93,8 @@ func Start() {
 	}
 	InitOfflineDownloadTools()
 	EnsureLocalDriveStorages()
+	// Pull remote settings before storages are loaded so they take effect.
+	configsync.Boot(context.Background())
 	LoadStorages()
 	InitTaskManager()
 	// 初始化转码模块（总开关关时也会启动 manager，但本地 worker 仅在 enabled 时由 Manager.Start 内部按 run_mode 启动）

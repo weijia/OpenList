@@ -337,3 +337,5 @@ replace github.com/cronokirby/saferith => github.com/Da3zKi7/saferith v0.33.0-fi
 // replace github.com/OpenListTeam/115-sdk-go => ../../OpenListTeam/115-sdk-go
 
 replace github.com/KarpelesLab/reflink => github.com/OpenListTeam/reflink v0.0.0-20260701021214-78760eaeafef
+
+require github.com/weijia/go-zenfs-config v0.1.0
