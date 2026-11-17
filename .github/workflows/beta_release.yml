@@ -71,6 +71,9 @@ jobs:
     # part that matters, and a missing release is created below.
     if: ${{ !cancelled() }}
     strategy:
+      # 单个矩阵目标失败时不要取消其他目标；否则 windows-arm64 的 zig 安装失败
+      # 会连带取消 android 构建，导致 beta 没有新的 Android 包。
+      fail-fast: false
       matrix:
         include:
           - target: "!(*musl*|*windows-arm64*|*windows7-*|*android*|*freebsd*)" # xgo and loongarch (exclude mips64le)
