@@ -20,6 +20,11 @@ func splitSegments(p string) []string {
 	parts := strings.Split(strings.ReplaceAll(p, "\\", "/"), "/")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
+		// 前端缓存/收藏里可能还带着 Windows 盘符写法（C:\codes、C:/codes），
+		// OpenList 的虚拟根实际是 /C/…；这里把盘符段 C: 归一成 C，避免出现 /C:/codes。
+		if len(out) == 0 && len(part) == 2 && part[1] == ':' && isASCIILetter(part[0]) {
+			part = strings.ToUpper(part[:1])
+		}
 		switch part {
 		case "", ".":
 			continue
@@ -32,6 +37,10 @@ func splitSegments(p string) []string {
 		out = append(out, part)
 	}
 	return out
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 func normalizeVirtual(p string) string {
